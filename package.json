@@ -1,0 +1,11 @@
+{
+  "name": "module-cube",
+  "version": "1.0.0",
+  "description": "microfrontend sandbox base on web components",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "author": "wuqi",
+  "license": "MIT"
+}
