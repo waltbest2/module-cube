@@ -1,3 +1,10 @@
+export interface LoaderOption {
+
+}
+
+/**
+ * 远程加载配置
+ */
 export interface RemoteComponentOption {
   /**
    * web component的tagName
@@ -77,6 +84,9 @@ export interface ServiceType {
   serviceName?: string;
 }
 
+/**
+ * 生命周期钩子入参
+ */
 export interface LifeParams {
   /**
    * 返回的module, 执行mount后返回的
@@ -104,6 +114,9 @@ export interface LifeParams {
   wc?: any;
 }
 
+/**
+ * 生命周期回调钩子，用于自定义逻辑
+ */
 export interface SandboxLifecycle {
   /**
    * 加载组件之前的处理
@@ -141,6 +154,9 @@ export interface SandboxLifecycle {
   afterAppendWC?: ({module, zone, host, wcTagName, wc}: LifeParams) => void;
 }
 
+/**
+ * 沙箱全局配置
+ */
 export interface CssSandboxOption {
   /**
    * 堆栈模式能够查询最大的堆栈数量，仅chrome支持
@@ -177,6 +193,9 @@ export interface CssSandboxOption {
 
 }
 
+/**
+ * 子服务配置
+ */
 export interface ServiceOption {
 
   /**

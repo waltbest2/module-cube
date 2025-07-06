@@ -333,16 +333,9 @@ export class CssSandbox {
   private zoneList: { [service: string]: any } = {};
 
   /**
-   * 用于缓存iife加载的入口js内容，防止重复fetch
-   */
-  public entryIIFEJsCache = {};
-
-  /**
    * 保存当前document下所有的host节点，如果有shadowDom，就是shadowDom，否则就是module-cube节点
    */
   private moduleList: { [moduleName: string]: {host: any; serviceName: string }} = {};
-
-  public readonly version = '@mc_version';
 
   private readonly jsSandboxLabel = Symbol('js-sandbox');
 
@@ -353,21 +346,21 @@ export class CssSandbox {
   /**
    * 下面开始保存各个劫持的原生方法
    */
-  private rawElementAppendChild = Element.prototype.appendChild;
-
   private rawBodyAppendChild = HTMLBodyElement.prototype.appendChild;
 
   private rawHeadAppendChild = HTMLHeadElement.prototype.appendChild;
 
+  private rawElementAppendChild = Element.prototype.appendChild;
+
   private rawNodeAppendChild = Node.prototype.appendChild;
-
-  private rawElementRemoveChild = Element.prototype.removeChild;
-
-  private rawNodeRemoveChild = Node.prototype.removeChild;
 
   private rawBodyRemoveChild = HTMLBodyElement.prototype.removeChild;
 
   private rawHeadRemoveChild = HTMLHeadElement.prototype.removeChild;
+
+  private rawElementRemoveChild = Element.prototype.removeChild;
+
+  private rawNodeRemoveChild = Node.prototype.removeChild;
 
   private rawElementRemove = Element.prototype.remove;
 
@@ -380,6 +373,13 @@ export class CssSandbox {
   private rawDocumentQuerySelectorAll = document.querySelectorAll;
 
   private rawInsertAdjacentElement = Element.prototype.insertAdjacentElement;
+
+  /**
+   * 用于缓存iife加载的入口js内容，防止重复fetch
+   */
+  public entryIIFEJsCache = {};
+
+  public readonly version = '@mc_version';
 
   constructor(options?: CssSandboxOption) {
     if (globalThis._CSSSandbox) {
@@ -409,11 +409,20 @@ export class CssSandbox {
         this.patch();
       }
 
+      // 防止有些微前端框架不让直接修改window下变量
       globalThis.__proto__._CSSSandbox = this;
       globalThis.__proto__._JSSandbox = {
         __mcGlobal: {},
       }
     }
+  }
+
+  private patch() {
+
+  }
+
+  private unpatch() {
+
   }
 
   /**

@@ -1,3 +1,7 @@
+/**
+ * 生成随机字符串
+ * @returns 
+ */
 export function genRandomString(): string {
   if (globalThis.crypto?.randomUUID) {
     return globalThis.crypto.randomUUID();
