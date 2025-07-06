@@ -583,7 +583,7 @@ export class CssSandbox {
       // 记录额外添加到head的style，需要动态清除
       element._headStyles = element._headStyles || [];
       element._headStyles.push(style);
-      this.rawElementAppendChild.call(document.ATTRIBUTE_NODE, style);
+      this.rawElementAppendChild.call(document.head, style);
     }
   }
 
