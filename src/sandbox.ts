@@ -596,7 +596,281 @@ export class CssSandbox {
     }
   }
 
+  /**
+   * 将link复制到其它同类节点
+   * @param service 
+   * @param element 
+   * @returns 
+   */
+  private cloneLink2OtherHost(service, element) {
+    const { serviceId, serviceName } = service;
+    if (!element.href || !serviceId) {
+      return;
+    }
 
+
+    for (const [id, module] of Object.entries(this.moduleList)) {
+      const { host } = module;
+      if (module.serviceName === serviceName && serviceId !== id && !getLinkInHost(element, host)) {
+        const link = cloneLink(element);
+        link.onload = () => {
+          patchCSS(host, link.sheet);
+        };
+        this.rawElementAppendChild.call(host, link);
+      }
+    }
+  }
+
+  /**
+   * 除了第一个执行的组件外，其他相同组件也需要添加样式
+   * @param service 
+   * @param element 
+   * @param includeHead 
+   */
+  private cloneCSS2OtherHost(service, element, includeHead: boolean) {
+    if (element.tagName === 'STYLE') {
+      this.cloneStyle2OtherHost(service, element, includeHead);
+    } else {
+      this.cloneLink2OtherHost(service, element);
+    }
+  }
+
+  /**
+   * 校验这个样式是不是全局
+   * @param service 
+   * @param element 
+   * @returns 
+   */
+  private checkGlobalCSS(service, element): boolean {
+    const { serviceName } = service;
+    const { globalCheck } = this.serviceList[serviceName] || {};
+    if (globalCheck) {
+      const host = this.getHost(service);
+      return globalCheck(host, element);
+    }
+
+    return false;
+  }
+
+  /**
+   * 给host添加link，同时添加到当前页面其他相同元素
+   * @param service 服务信息
+   * @param host 宿主节点
+   * @param element link元素
+   * @param checkExist 针对主动添加link的场景，如果已经存在，把自己删掉
+   * @returns 
+   */
+  private addNewLink(service, host, element, checkExist = false) {
+    const { serviceName } = service;
+
+    //需要使用addEventListener，不能用load，否则webpack动态添加link，覆盖webpack的link.onload中的promise的resolve
+    element.addEventListener('load', () => {
+      if (element.href) {
+        if (!this.serviceLinks[serviceName].get(element.href)) {
+          const newLink = cloneLink(element);
+          this.serviceLinks[serviceName].set(newLink.href, newLink);
+        } else if (checkExist && getLinkInHost(element, host)) {
+          // 针对主动添加link的场景，如果已经存在，把自己删除
+          console.warn('[module-cube] not first time to add link');
+          element.remove();
+          return;
+        }
+
+        patchCSS(host, element.sheet);
+        this.cloneCSS2OtherHost(service, element, false);
+      } else {
+        console.warn('[module-cube] no href in link. Ignore it');
+      }
+    });
+    return this.rawElementAppendChild.call(host, element);
+  }
+
+  /**
+   * 同一个组件，可能只会增加一次
+   * @param service 
+   * @param element 
+   * @param includeHead 
+   */
+  private patchStyleAppend(service: ServiceType, element, includeHead: boolean) {
+    const { serviceName } = service;
+    if (!serviceName) {
+      return;
+    }
+
+    const host = this.getHost(service);
+
+    this.serviceStyles[serviceName] = this.serviceStyles[serviceName] || new Map<string, Node>();
+
+    // 存在先添加style，再补充内容，监听判断，类似g6
+    if (!element.textContent) {
+      let styleObserver: any = new MutationObserver(() => {
+        styleObserver.disconnect();
+        styleObserver = null;
+
+        // 如果已经存在，则忽略
+        if ([...this.serviceStyles[serviceName].keys()].includes(element.textContent)) {
+          console.warn('[module-cube] get empty or exist style! ignore it');
+          try {
+            this.rawElementRemoveChild.call(host, element);
+          } catch (e) {
+            this.rawElementRemove.call(element);
+          }
+
+          return;
+        }
+
+        patchCSS(host, element.sheet);
+        const style = cloneStyle(element);
+        this.serviceStyles[serviceName].set(style.textContent!, style);
+
+        // 复制到其他service
+        this.cloneCSS2OtherHost(service, element, includeHead);
+      });
+
+      styleObserver.observe(element, { childList: true });
+
+      // 5s后如果还是为空，则清除监听和节点
+      let timeout: any = setTimeout(() => {
+        clearTimeout(timeout);
+        timeout = null;
+        // 如果5s还是为空，则该节点重复，删掉
+        if (element && !element.textContent) {
+          console.warn('[module-cube] get empty style after 5s! ignore it');
+          try {
+            this.rawElementRemoveChild.call(host, element);
+          } catch (e) {
+            this.rawElementRemove.call(element);
+          }
+          styleObserver?.disconnect();
+          styleObserver = null;
+        }
+      }, 5000);
+    }
+
+    if (![...this.serviceStyles[serviceName].keys()].includes(element.textContent)) { 
+      if (element.textContent) {
+        const style = cloneStyle(element);
+        this.serviceStyles[serviceName].set(style.textContent!, style);
+      }
+
+      const ele = this.rawElementAppendChild.call(host, element);
+      patchCSS(host, element.sheet);
+      return ele;
+    } else {
+      const existStyle = getStyleInHost(element.textContent, host);
+      if (existStyle) {
+        existStyle.remove();
+      }
+      const ele = this.rawElementAppendChild.call(host, element);
+      patchCSS(host, element.sheet);
+      return ele;
+    }
+  }
+
+  /**
+   * 添加link额外处理
+   * @param service 
+   * @param element 
+   * @returns 
+   */
+  private patchLinkAppend(service: ServiceType, element) {
+    const { serviceName } = service;
+    if (!serviceName) {
+      return;
+    }
+
+    const host = this.getHost(service);
+
+    element.setAttribute('crossorigin', 'anonymous');
+
+    this.serviceLinks[serviceName] = this.serviceLinks[serviceName] || new Map<string, Node>();
+    return this.addNewLink(service, host, element, true);
+  }
+
+  /**
+   * 劫持appendChild
+   * 
+   * rawElementAppendChild 表示 Node.prototype
+   * @param point 
+   * @param rawFn 
+   */
+  private patchElementAppendChild(point: Function, rawFn: Function) {
+    const target = this;
+
+    point.prototype.appendChild = function <T extends Node>(node: T) {
+      const element = node as any;
+
+      if (!element) {
+        return rawFn.call(this, element);
+      }
+      if (this === document.body && element.tagName !== target.mcTagNameUpper) {
+        const service: ServiceType = target.check({ style: element }) as ServiceType;
+        if (service) {
+          const host = target.getHost(service, true);
+          if (host) {
+            return rawFn.call(host, element);
+          }
+        }
+        return rawFn.call(this, element);
+      }
+
+      if (!(this instanceof HTMLHeadElement)) {
+        return rawFn.call(this, element);
+      }
+
+      if (element.tagName === 'STYLE') {
+        const service: ServiceType = target.check({style: element}) as ServiceType;
+        if (service) {
+          const isGlobal = target.checkGlobalCSS(service, element);
+          const result = target.patchStyleAppend(service, element, isGlobal);
+          if (result) {
+            target.cloneCSS2OtherHost(service, element, isGlobal);
+            return result;
+          }
+        }
+      } else if (isStyleLink(element)) {
+        const service: ServiceType = target.check({ link: element }) as ServiceType;
+        if (service) {
+          return target.patchLinkAppend(service, element);
+        }
+      }
+
+      return rawFn.call(this, element);
+    };
+  }
+
+  /**
+   * 为了适配qiankun，劫持HTMLHeadElement和HTMLBodyElement原型的appendChild
+   */
+  private patchHeadAppendChild() {
+    const target = this;
+    HTMLHeadElement.prototype.appendChild = function <T extends Node>(node: T) {
+      const element = node as any;
+
+      if (!element) {
+        return target.rawHeadAppendChild.call(this, element);
+      }
+
+      if (element.tagName === 'STYLE') {
+        const service: ServiceType = target.check({ style: element }) as ServiceType;
+        if (service) {
+          const isGlobal = target.checkGlobalCSS(service, element);
+          const result = target.patchStyleAppend(service, element, isGlobal);
+          if (result) {
+            target.cloneCSS2OtherHost(service, element, isGlobal);
+            return result;
+          }
+        }
+      } else if (isStyleLink(element)) {
+        const service: ServiceType = target.check({ link: element }) as ServiceType;
+        if (service) {
+          return target.patchLinkAppend(service, element);
+        }
+      }
+
+      return target.rawHeadAppendChild.call(this, element);
+    };
+  }
 
 
 }
