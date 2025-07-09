@@ -1,4 +1,79 @@
+export interface ProviderOption {
+  /**
+   * 导出方法名
+   */
+  exportFn?: string;
+
+  /**
+   * 输入参数，只在exportFn时有效
+   * 
+   * 数组时，表示多个参数，如果是单个数组参数，请使用any[][]
+   */
+  params?: any;
+
+  /**
+   * 导出模块名
+   */
+  exportModule?: string;
+}
+
 export interface LoaderOption {
+  /**
+   * 加载远端组件的入口url
+   */
+  entryUrl: string;
+
+  /**
+   * 对外开放的模式
+   * 
+   * 默认 module
+   */
+  type?: 'window' | 'module' | 'iife' | 'systemjs';
+
+  /**
+   * type=window下必填
+   * 
+   * 注意如果是vite模式，则表示模块名，例如import('name/component');
+   */
+  name?: string;
+
+  /**
+   * 对外expose的模块名，例如：'component': './src/components/a.component.ts'
+   * 
+   * 注意如果是vite模式，则表示组件名，例如import('name/component');
+   * 
+   * iife下不涉及
+   */
+  component?: string;
+
+  /**
+   * 对外提供的版本号
+   */
+  version?: string;
+
+  /**
+   * 需要加载的css文件路径，支持多个css
+   * 
+   * 例如：//localhost:8080/usercenter/style.css
+   */
+  css?: string | string[];
+
+  /**
+   * 提供方额外的提供配置
+   */
+  providerConfig?: ProviderOption;
+
+  /**
+   * css挂载的host，可以是shadowDom Host，默认是document.head
+   */
+  cssHost?: any;
+
+  /**
+   * 是否共享库给远端。在某些场景下，例如两边angular版本不一致时，如果强行共享，可能运行错误，所以这是可能需要禁止共享
+   * 
+   * 默认：true
+   */
+  needShare?: boolean;
 
 }
 

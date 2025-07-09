@@ -21,3 +21,7 @@ export function genRandomString(): string {
     return `${Date.now()}`;
   }
 }
+
+export function isRealObject(module): boolean {
+  return typeof module === 'object' && module !== null;
+}

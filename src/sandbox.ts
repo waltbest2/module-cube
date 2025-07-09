@@ -1,7 +1,8 @@
 
+import { loadCss } from './consumer';
 import { initModuleCubeWebcomponent } from './module-cube';
 import { CssSandboxOption, RemoteComponentOption, ServiceOption, ServiceType } from './types';
-import { genRandomString } from './utils';
+import { genRandomString, isRealObject } from './utils';
 
 declare const globalThis;
 declare const Error;
@@ -415,14 +416,6 @@ export class CssSandbox {
         __mcGlobal: {},
       }
     }
-  }
-
-  private patch() {
-
-  }
-
-  private unpatch() {
-
   }
 
   /**
@@ -872,5 +865,544 @@ export class CssSandbox {
     };
   }
 
+  private patchBodyAppendChild() {
+    const target = this;
+
+    HTMLBodyElement.prototype.appendChild = function <T extends Node>(node: T) {
+      const element = node as any;
+
+      if (!element) {
+        return target.rawBodyAppendChild.call(this, element);
+      }
+
+      if (element.tagName !== target.mcTagNameUpper) {
+        const service: ServiceType = target.check({ style: element }) as ServiceType;
+        if (service) {
+          const host = target.getHost(service, true);
+          if (host) {
+            return target.rawBodyAppendChild.call(host, element);
+          }
+        }
+      }
+
+      return target.rawBodyAppendChild.call(this, element);
+    };
+  }
+
+  /**
+   * 劫持不同层面的原型上的appendChild
+   */
+  private patchAppendChild() {
+    if (Object.prototype.hasOwnProperty.call(HTMLHeadElement.prototype, 'appendChild')) {
+      this.patchHeadAppendChild();
+    }
+
+    if (Object.prototype.hasOwnProperty.call(HTMLBodyElement.prototype, 'appendChild')) {
+      this.patchBodyAppendChild();
+    }
+
+    if (Object.prototype.hasOwnProperty.call(Element.prototype, 'appendChild')) {
+      this.patchElementAppendChild(Element, this.rawElementAppendChild);
+    }
+
+    this.patchElementAppendChild(Node, this.rawNodeAppendChild);
+  }
+
+  /**
+   * 劫持removeChild
+   * @param point 
+   * @param rawFn 
+   */
+  private patchElementRemoveChild(point: Function, rawFn: Function) {
+    const target = this;
+
+    // 支持不同微前端框架劫持不同层面
+    point.prototype.removeChild = function <T extends Node>(node: T) {
+      const element = node as any;
+      if (!element) {
+        return rawFn.call(this, element);
+      }
+
+      if (this === document.body && element.tagName !== target.mcTagNameUpper) {
+        const service: ServiceType = target.check({ style: element }) as ServiceType;
+        if (service) {
+          const host = target.getHost(service, true);
+          if (host) {
+            try {
+              rawFn.call(host, element);
+            } catch (e) {
+              console.warn('[module-cube] host does not have child elment, remove from document.body, element is', element);
+            }
+          }
+        }
+
+        return rawFn.call(this, element);
+      }
+
+      if (!(this instanceof HTMLHeadElement)) {
+        return rawFn.call(this, element);
+      }
+
+      if (element.tagName === 'STYLE' && element.textContent) {
+        const service: ServiceType = target.check({ style: element }) as ServiceType;
+        const { serviceName } = service || {};
+        const ele = target.serviceStyles[serviceName!]?.get(element.textContent);
+        if (ele) {
+          target.serviceStyles[serviceName!].delete(element.textContent);
+        }
+
+        if (service) {
+          return rawFn.call(target.getHost(service), element);
+        }
+      } else if (isStyleLink(element)) {
+        const service: ServiceType = target.check({ link: element }) as ServiceType;
+        const { serviceName } = service || {};
+        const ele = target.serviceStyles[serviceName!]?.get(element.href);
+        if (ele) {
+          target.serviceLinks[serviceName!].delete(element.href);
+        }
+
+        if (service) {
+          return rawFn.call(target.getHost(service), element);
+        }
+      }
+
+      return rawFn.call(this, element);
+    };
+  }
+
+  /**
+   * 为了适配qiankun，劫持HTMLHeadElement和HTMLBodyElement原型的removeChild
+   */
+  private patchHeadRemoveChild() {
+    const target = this;
+    HTMLHeadElement.prototype.removeChild = function <T extends Node>(node: T) {
+      const element = node as any;
+      if (!element) {
+        return target.rawHeadRemoveChild.call(this, element);
+      }
+
+      if (element.tagName === 'STYLE' && element.textContent) {
+        const service: ServiceType = target.check({ style: element }) as ServiceType;
+        const { serviceName } = service || {};
+        const ele = target.serviceStyles[serviceName!]?.get(element.textContent);
+        if (ele) {
+          target.serviceStyles[serviceName!].delete(element.textContent);
+        }
+
+        if (service) {
+          return target.rawHeadRemoveChild.call(target.getHost(service), element);
+        }
+      } else if (isStyleLink(element)) {
+        const service: ServiceType = target.check({ link: element }) as ServiceType;
+        const { serviceName } = service || {};
+        const ele = target.serviceStyles[serviceName!]?.get(element.href);
+        if (ele) {
+          target.serviceLinks[serviceName!].delete(element.href);
+        }
+
+        if (service) {
+          return target.rawHeadRemoveChild.call(target.getHost(service), element);
+        }
+      }
+
+      return target.rawHeadRemoveChild.call(this, element);
+    }
+  }
+
+  /**
+   * 为了适配qiankun，劫持HTMLHeadElement和HTMLBodyElement原型的removeChild
+   */
+  private patchBodyRemoveChild() {
+    const target = this;
+
+    HTMLBodyElement.prototype.removeChild = function <T extends Node>(node: T) {
+      const element = node as any;
+      if (!element) {
+        return target.rawBodyRemoveChild.call(this, element);
+      }
+
+      if (element.tagName !== target.mcTagNameUpper) {
+        const service: ServiceType = target.check({ style: element }) as ServiceType;
+        if (service) {
+          const host = target.getHost(service, true);
+          if (host) {
+            // 防止host的子不是element
+            try {
+              target.rawBodyRemoveChild.call(host, element);
+            } catch (e) {
+              console.warn('[module-cube] host does not have child, remove from document.body, element is', element);
+            }
+          }
+        }
+      }
+
+      return target.rawBodyRemoveChild.call(this, element);
+    }
+  }
+
+  /**
+   * 劫持不同层面的原型上的removeChild
+   */
+  private patchRemoveChild() {
+    if (Object.prototype.hasOwnProperty.call(HTMLHeadElement.prototype, 'removeChild')) {
+      this.patchHeadRemoveChild();
+    }
+
+    if (Object.prototype.hasOwnProperty.call(HTMLBodyElement.prototype, 'removeChild')) {
+      this.patchBodyRemoveChild();
+    }
+
+    if (Object.prototype.hasOwnProperty.call(Element.prototype, 'removeChild')) {
+      this.patchElementRemoveChild(Element, this.rawElementRemoveChild);
+    }
+
+    // 即使劫持head和body，也要考虑Node的劫持
+    this.patchElementRemoveChild(Node, this.rawNodeRemoveChild);
+  }
+
+  /**
+   * 动态删除style的时候，需要清理缓存的styles，下次可以自动添加
+   */
+  private patchElementRemove() {
+    const target = this;
+
+    Element.prototype.remove = function() {
+      if (this.tagName !== 'STYLE') {
+        return target.rawElementRemove.call(this);
+      }
+
+      const service: ServiceType = target.check({ style: this }) as ServiceType;
+      const { serviceName } = service || {};
+      const ele = target.serviceStyles[serviceName!]?.get(this.textContent);
+      if (ele) {
+        target.serviceStyles[serviceName!].delete(this.textContent);
+      }
+
+      // 额外添加到head的style，要及时清理
+      const { _headStyles } = this;
+      while (_headStyles?.length) {
+        const style = _headStyles.pop();
+        target.rawElementRemove.call(style);
+      }
+
+      return target.rawElementRemove.call(this);
+    };
+  }
+
+  /**
+   * 劫持querySelector，如果是在子服务中，则优先在shadowdom中找，找不到去document中找
+   */
+  private patchDocumentQuerySelector() {
+    const target = this;
+
+    document.querySelector = function(selector: string) {
+      if (!isInnerSelector(selector)) {
+        return target.rawDocumentQuerySelector.call(this, selector);
+      }
+
+      const service: ServiceType = target.check() as ServiceType;
+      if (service) {
+        const host = target.getHost(service);
+        if (host) {
+          if (selector === HOST_SELECTOR) {
+            return host.host || host;
+          }
+
+          return host.querySelector(selector) || target.rawDocumentQuerySelector.call(this, selector);
+        }
+      }
+
+      return target.rawDocumentQuerySelector.call(this, selector);
+    };
+
+    document.querySelectorAll = function(selector: string) {
+      if (!isInnerSelector(selector)) {
+        return target.rawDocumentQuerySelectorAll.call(this, selector);
+      }
+
+      const service: ServiceType = target.check() as ServiceType;
+      if (service) {
+        const host = target.getHost(service);
+        if (host) {
+          return host.querySelectorAll(selector) || target.rawDocumentQuerySelectorAll.call(this, selector);
+        }
+      }
+
+      return target.rawDocumentQuerySelectorAll.call(this, selector);
+    };
+  }
+
+  /**
+   * 劫持原生customElement.define
+   * 
+   * 仿照Zone.js的劫持
+   */
+  private patchCustomElementDefine() {
+    const target = this;
+
+    globalThis.customElements.define = function (name: string, opts: { prototype: { connectedCallback?: Function }}, options?: any) {
+      if (opts?.prototype) {
+        const prototype = opts.prototype;
+        try {
+          if (prototype.connectedCallback) {
+            prototype.connectedCallback = wrapCustomElementFn('connectedCallback', prototype.connectedCallback);
+          }
+        } catch (e) {
+          console.warn('[module-cube] patch connectedCallback failed ', e.message);
+        }
+      }
+
+      return target.rawCustomElementsDefine.call(globalThis.customElements, name, opts, options);
+    }
+  }
+
+  /**
+   * getComputedStyle(shadowRoot) 会报错，仿照处理下
+   */
+  private patchGetComputedStyle() {
+    const target = this;
+
+    globalThis.getComputedStyle = function (element, pseudoElt) {
+      if (isShadowDomType(element)) {
+        return {};
+      }
+
+      return target.rawGetComputedStyle.call(this, element, pseudoElt);
+    }
+  }
+
+  /**
+   * 检查该接口是不是在module-cube的shadowDom中，并返回shadowDom
+   * @param element 
+   */
+  private getShadowWhenInModuleCube(element: any) {
+    if (isShadowDomType(element.parentNode) && element.parentNode.host.tagName === this.mcTagNameUpper) {
+      return element.parentNode;
+    }
+
+    return null;
+  }
+
+  /**
+   * 为了适配vite开发态，Style.insertAdjacentElement劫持处理
+   */
+  private patchInsertAdjacentElement() {
+    const target = this;
+
+    Element.prototype.insertAdjacentElement = function (position, element: any) {
+      const ret = target.rawInsertAdjacentElement.call(this, position, element);
+
+      if (this.tagName === 'STYLE' && element.tagName === 'STYLE' && position === 'afterend') {
+        const host = target.getShadowWhenInModuleCube(this);
+
+        if (!host) {
+          return ret; 
+        }
+
+        patchCSS(host, element.sheet);
+        const serviceName = host.host.getAttribute('servicename');
+        const serviceId = host.host.getAttribute('id');
+        const style = cloneStyle(element);
+        target.serviceStyles[serviceName].set(style.textContent!, style);
+
+        // 复制到其他service
+        target.cloneCSS2OtherHost({ serviceId, serviceName }, element, false);
+      }
+
+      return ret;
+    };
+  }
+
+  /**
+   * 整体patch
+   */
+  private patch() {
+    if (!this.needPatched) {
+      console.warn('[module-cube] needPatch is false, no need to patch');
+      return;
+    }
+
+    if (this.alreadyPatched) {
+      console.warn('[module-cube] already patched');
+      return;
+    }
+
+    this.patchAppendChild();
+    this.patchRemoveChild();
+    this.patchElementRemove();
+
+    this.patchCustomElementDefine();
+    this.patchGetComputedStyle();
+    this.patchDocumentQuerySelector();
+    this.patchInsertAdjacentElement();
+
+    this.alreadyPatched = true;
+  }
+
+  /**
+   * 取消patch
+   */
+  private unpatch() {
+    if(!this.needPatched) {
+      console.warn('[module-cube] needPatched is false, no need to unpatch');
+      return;
+    }
+
+    Element.prototype.appendChild = this.rawElementAppendChild;
+    Node.prototype.removeChild = Element.prototype.removeChild = this.rawElementRemoveChild;
+    Element.prototype.remove = this.rawElementRemove;
+    globalThis.customElements.define = this.rawCustomElementsDefine;
+    globalThis.getComputedStyle = this.rawGetComputedStyle;
+    document.querySelector = this.rawDocumentQuerySelector;
+    document.querySelectorAll = this.rawDocumentQuerySelectorAll;
+    Element.prototype.insertAdjacentElement = this.rawInsertAdjacentElement;
+    this.alreadyPatched = false;
+  }
+
+  private appendExistStylesAndLinks(serviceName: string, host: any) {
+    const styles = this.serviceStyles[serviceName];
+
+    styles?.forEach((ele: any) => {
+      if (!getStyleInHost(ele.textContent, host)) {
+        const style = cloneStyle(ele);
+        this.rawElementAppendChild.call(host, style);
+        patchCSS(host, style.sheet);
+      }
+    });
+
+    const links = this.serviceLinks[serviceName];
+
+    links?.forEach((ele: any) => {
+      if (!getLinkInHost(ele, host)) {
+        const link = cloneLink(ele);
+        this.addNewLink({ serviceName }, host, link);
+      }
+    });
+  }
+
+  private addExtraCSS(host, cssContent) {
+    if (!cssContent) {
+      return;
+    }
+
+    const style = document.createElement('style');
+    style.textContent = cssContent;
+    host.appendChild(style);
+  }
+
+  public clearZoneByNodeId(id: string) {
+    this.zoneList[id] = undefined;
+    delete this.zoneList[id];
+  }
+
+  /**
+   * 创建并获取module-cube这个webcomponent dom元素
+   * @param id 根据父元素生成的id
+   * @param options 
+   * @returns 
+   */
+  private createModuleCubeDom(id: string, options: RemoteComponentOption) {
+    const { serviceName, mcAttributes, jsSandboxProps } = options || {};
+    let container;
+    if (customElements.get(this.mcTagName)) {
+      container = document.createElement(this.mcTagName);
+    } else {
+      container = document.createElement('div');
+    }
+
+    if (isRealObject(mcAttributes)) {
+      for (const [key, value] of Object.entries(mcAttributes!)) {
+        container.setAttribute(key, value);
+      }
+    }
+
+    container.setAttribute('servicename', serviceName);
+    container.setAttribute('v', this.version);
+    container.setAttribute('id', id);
+
+    container.jsSandboxProps = jsSandboxProps;
+
+    return container;
+  }
+
+  /**
+   * 创建并获取module-cube下的shadowDom,如果不需要返回module-cube
+   * @param needShadowDom 
+   * @param container 
+   * @returns 
+   */
+  private getShadowDom(needShadowDom, container) {
+    let subHost;
+    if (this.needShadowDom && needShadowDom !== false) {
+      const shadowRoot = container.attachShadow({ mode: 'open'});
+      subHost = shadowRoot;
+    } else {
+      subHost = container;
+    }
+
+    return subHost;
+  }
+
+  /**
+   * 在body添加全局div
+   * @param serviceName 
+   * @param options 
+   * @returns 
+   */
+  private addGlobalDiv(serviceName: string, options: RemoteComponentOption): void {
+    const { useGlobalDivSandbox, needShadowDom } = this.serviceList[serviceName] || {};
+    if (!useGlobalDivSandbox) {
+      return;
+    }
+
+    const globalId = genGlobalDivId(serviceName);
+
+    if (this.moduleList[globalId]?.host) {
+      return;
+    }
+
+    const container = this.createModuleCubeDom(globalId, options);
+    const subHost = this.getShadowDom(needShadowDom, container);
+
+    document.body.appendChild(container);
+
+    const { extraCss, loaderOption } = options || {};
+    this.addExtraCSS(subHost, extraCss);
+
+    const { css } = loaderOption || {};
+    loadCss(css, subHost);
+  }
+
+  /**
+   * 根据加载组件的父节点获取id
+   * @param hostNode 父节点
+   * @param options 服务名和id
+   * @returns 
+   */
+  private getParentId(hostNode, options: RemoteComponentOption) {
+    const { serviceName, mcAttributes } = options;
+    let id = mcAttributes?.id;
+    if (!id) {
+      const pId = hostNode.getAttribute('id');
+      if (pId) {
+        id = `${ID_PREFIX}_${pId}`;
+      } else {
+        id = genId(serviceName);
+      }
+    }
+
+    return id;
+  }
+
+  /**
+   * 加载组件失败，需要清理组件，globalDiv先不清理，因为是共用的
+   * @param container 
+   */
+  private clearModuleCube(container) {
+    if (container) {
+      container.remove();
+    }
+  }
 
 }
