@@ -1,7 +1,7 @@
 
 import { loadCss } from './consumer';
 import { initModuleCubeWebcomponent } from './module-cube';
-import { CssSandboxOption, RemoteComponentOption, ServiceOption, ServiceType } from './types';
+import { CssSandboxOption, LifeParams, ModuleType, ProviderOption, RemoteComponentOption, ServiceOption, ServiceType } from './types';
 import { genRandomString, isRealObject } from './utils';
 
 declare const globalThis;
@@ -336,7 +336,7 @@ export class CssSandbox {
   /**
    * 保存当前document下所有的host节点，如果有shadowDom，就是shadowDom，否则就是module-cube节点
    */
-  private moduleList: { [moduleName: string]: {host: any; serviceName: string }} = {};
+  private moduleList: { [moduleName: string]: {host?: any; serviceName?: string }} = {};
 
   private readonly jsSandboxLabel = Symbol('js-sandbox');
 
@@ -1405,4 +1405,248 @@ export class CssSandbox {
     }
   }
 
+  /**
+   * 把shadowDom host加入到参数中
+   * @param providerConfig 
+   * @param subHost 
+   * @returns 
+   */
+  private addHost2Params(providerConfig: ProviderOption, subHost) {
+    if (!providerConfig) {
+      return;
+    }
+
+    const { params } = providerConfig;
+    if (Array.isArray(params)) {
+      params.push(subHost);
+    } else {
+      providerConfig.params = [params, subHost];
+    }
+  }
+
+  /**
+   * 在zone里运行一些生命周期钩子回调
+   * @param hook 
+   * @param params 
+   * @returns 
+   */
+  private runLifeHooks(hook: (params: LifeParams) => any, params: LifeParams): any {
+    if (!hook) {
+      return undefined;
+    }
+
+    const { zone } = params;
+    let ret;
+    if (zone) {
+      zone.run(() => {
+        ret = hook({...params});
+      });
+    } else {
+      ret = hook({...params});
+    }
+
+    return ret;
+  }
+
+  private loadIifeInZone() {
+
+  }
+
+
+  /**
+   * 在zone中执行
+   * @param id 
+   * @param serviceName 
+   * @param options 
+   * @returns 
+   */
+  private runInZone(id: string, serviceName: string, options: RemoteComponentOption): Promise<any & { unmount: Function}> {
+    const { jsSandboxProps, lifecycle, loaderOption } = options;
+    const { type = 'module', entryUrl, cssHost, css } = loaderOption || {};
+    const { beforeLoadComponent } = lifecycle || {};
+
+    return new Promise(r => {
+      if (globalThis.Zone && this.needPatched) {
+        let zone = this.zoneList[id];
+        if (!zone) {
+          zone = globalThis.Zone.current.fork({
+            name: id,
+            properties: {
+              [ZoneLabel]: true,
+              serviceName,
+            }
+          });
+          this.zoneList[id] = zone;
+        }
+
+        if (!entryUrl) {
+          r(undefined);
+          return;
+        }
+
+        this.runLifeHooks(beforeLoadComponent!, { zone } as any);
+        this.isolateWindwoJS(jsSandboxProps!);
+        if (type === ModuleType.IIFE) {
+          this.loadIifeInZone(id, entryUrl, cssHost).finally(() => {
+            loadCss(css, cssHost);
+            r(undefined);
+          });
+        } else {
+          zone.run(() => {
+            r(loadRemoteComponent(options));
+          });
+        }
+      } else {
+        console.warn('[module-cube] no zone.js or no needPatched. run in root');
+        r(loadRemoteComponent(options));
+      }
+    });
+  }
+
+  public addModule(id: string, serviceName: string, host: any) {
+    this.moduleList[id] = {
+      serviceName,
+      host,
+    }
+  }
+
+  public clearModuleByNodeId(id: string, shadowRoot?: ShadowRoot) {
+    if (!this.moduleList[id]) {
+      return;
+    }
+
+    if (shadowRoot && this.moduleList[id].host !== shadowRoot) {
+      return;
+    }
+
+    this.moduleList[id].host = undefined;
+    delete this.moduleList[id].host;
+    delete this.moduleList[id].serviceName;
+    (this.moduleList[id] as any) = undefined;
+    delete this.moduleList[id];
+  }
+
+  private afterRun() {
+    
+  }
+
+  public async load(hostNode: any, options: RemoteComponentOption) : Promise<{
+    module: any & {unmount: Function} & {exception: Error}; host: any; zone: any 
+  }> {
+    const { serviceName, extraCss } = options;
+    const { needShadowDom } = this.serviceList[serviceName] || {};
+
+    // 根据加载组件的父节点获取id
+    const id = this.getParentId(hostNode, options);
+
+    // 如果配置全局div，则在body下添加module-cube，必须比原始组件先创建
+    this.addGlobalDiv(serviceName, options);
+
+    // 创建并获取module-cube这个webcomponent dom元素
+    const container = this.createModuleCubeDom(id, options);
+
+    // 创建并获取module-cube下的shadowDom，如果不需要返回module-cube
+    const subHost = this.getShadowDom(needShadowDom, container);
+
+    // 必须等shadowDom创建后再添加到hostNode，否则启动module-cube找不到shadowDom
+    hostNode.appendChild(container);
+
+    // 做一些存量样式处理
+    options.loaderOption.cssHost = subHost;
+    this.appendExistStylesAndLinks(serviceName, subHost);
+    this.addExtraCSS(subHost, extraCss);
+
+    // 刷新传递给webcomponent的参数，新增shadowDom
+    this.addHost2Params(options.loaderOption.providerConfig!, subHost);
+
+    // 调用远端逻辑
+    const module = await this.runInZone(id, serviceName, options);
+
+    if (module?.exception) {
+      this.clearModuleCube(container);
+
+      return {
+        module,
+        zone: null,
+        host: null,
+      }
+    }
+
+    const zone = this.zoneList[id];
+    const retObj = {
+      module,
+      zone,
+      host: subHost,
+    }
+
+    this.afterRun(retObj, options);
+    return retObj;
+  }
+
+
+
+  private isDefineBySandbox(prop): boolean {
+    if (!Object.prototype.hasOwnProperty.call(globalThis, prop)) {
+      return false;
+    }
+
+    const { get, configurable, writable } = Object.getOwnPropertyDescriptor(globalThis, prop) as PropertyDescriptor;
+    if ((get as any)?.from === this.jsSandboxLabel || configurable === false || writable === false) {
+      return true;
+    }
+
+    return false;
+  }
+
+  /**
+   * 一定的window变量隔离能力，但是没法监听delete操作
+   * 
+   * 不支持delete window.prop
+   * @param props 
+   * @returns 
+   */
+  private isolateWindwoJS(props: {prop: string; needClear?: boolean}[]) {
+    if (!props?.length) {
+      return;
+    }
+
+    for (const { prop } of props) {
+      // 如果已经沙箱定义，或者外部定义不让修改，就不重新定义
+      if (this.isDefineBySandbox(prop)) {
+        continue;
+      }
+
+      // 记录之前的值到global,便于后面使用
+      globalThis._JSSandbox.__mcGlobal[prop] = globalThis[prop];
+
+      const getFn: any = () => {
+        const { serviceName } = getServiceIdByCurrentZone() || {};
+        if (serviceName) {
+          globalThis._JSSandbox[serviceName] = globalThis._JSSandbox[serviceName] || {};
+          return globalThis._JSSandbox[serviceName][prop];
+        } else {
+          return globalThis._JSSandbox.__mcGlobal[prop];
+        }
+      };
+
+      getFn.from = this.jsSandboxLabel;
+
+      const setFn = v => {
+        const { serviceName } = getServiceIdByCurrentZone() || {};
+        if (serviceName) {
+          globalThis._JSSandbox[serviceName] = globalThis._JSSandbox[serviceName] || {};
+          globalThis._JSSandbox[serviceName][prop] = v;
+        } else {
+          globalThis._JSSandbox.__mcGlobal[prop] = v;
+        }
+
+        return true;
+      };
+
+      Object.defineProperty(globalThis, prop, {
+        set: setFn,
+        get: getFn,
+      })
+    }
+  }
 }

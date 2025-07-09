@@ -316,3 +316,11 @@ export interface ServiceOption {
    */
   useGlobalDivSandbox?: boolean;
 }
+
+export enum ModuleType {
+  WINDOW = 'window',
+
+  MODULE = 'module',
+
+  IIFE = 'iife',
+}
