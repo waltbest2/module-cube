@@ -1,5 +1,5 @@
 
-import { loadCss } from './consumer';
+import { loadComponent, loadCss } from './consumer';
 import { initModuleCubeWebcomponent } from './module-cube';
 import { CssSandboxOption, LifeParams, ModuleType, ProviderOption, RemoteComponentOption, ServiceOption, ServiceType } from './types';
 import { genRandomString, isRealObject } from './utils';
@@ -52,7 +52,7 @@ async function loadRemoteComponent(options: RemoteComponentOption) {
 }
 
 function isStyleLink(element) {
-  return element.tagName === 'LINK' && (!element.rel || element.rel === 'sytlesheet');
+  return element.tagName === 'LINK' && (!element.rel || element.rel === 'stylesheet');
 }
 
 function isShadowDomType(node) {
@@ -151,7 +151,7 @@ export function patchCSS(node, sheet, mediaConditionText?) {
     if (rule.type === CSSRule.FONT_FACE_RULE) {
       fontRules.push(rule.cssText);
     } else if (rule.type === CSSRule.MEDIA_RULE) {
-      patchCSS(node, rule, rule.mediaConditionText);
+      patchCSS(node, rule, rule.conditionText);
     } else {
       if(rule.selectorText?.includes(':root')) {
         rootRules.push(rule.cssText.replace(':root', ':host'));
@@ -189,7 +189,7 @@ function getMainService(callstack: string[], services: string[]): string {
 }
 
 /**
- * 复制新的stye
+ * 复制新的style
  * @param element 
  * @returns 
  */
@@ -557,6 +557,13 @@ export class CssSandbox {
     return document.head;
   }
   
+  /**
+   * 将样式复制到其他同类节点
+   * @param service 
+   * @param element 
+   * @param includeHead 
+   * @returns 
+   */
   private cloneStyle2OtherHost(service, element, includeHead: boolean) {
     const { serviceId, serviceName } = service;
 
@@ -957,7 +964,7 @@ export class CssSandbox {
       } else if (isStyleLink(element)) {
         const service: ServiceType = target.check({ link: element }) as ServiceType;
         const { serviceName } = service || {};
-        const ele = target.serviceStyles[serviceName!]?.get(element.href);
+        const ele = target.serviceLinks[serviceName!]?.get(element.href);
         if (ele) {
           target.serviceLinks[serviceName!].delete(element.href);
         }
@@ -996,7 +1003,7 @@ export class CssSandbox {
       } else if (isStyleLink(element)) {
         const service: ServiceType = target.check({ link: element }) as ServiceType;
         const { serviceName } = service || {};
-        const ele = target.serviceStyles[serviceName!]?.get(element.href);
+        const ele = target.serviceLinks[serviceName!]?.get(element.href);
         if (ele) {
           target.serviceLinks[serviceName!].delete(element.href);
         }
@@ -1243,7 +1250,7 @@ export class CssSandbox {
   /**
    * 取消patch
    */
-  private unpatch() {
+  public unpatch() {
     if(!this.needPatched) {
       console.warn('[module-cube] needPatched is false, no need to unpatch');
       return;
@@ -1291,6 +1298,10 @@ export class CssSandbox {
     host.appendChild(style);
   }
 
+  /**
+   * 清理zone
+   * @param id 
+   */
   public clearZoneByNodeId(id: string) {
     this.zoneList[id] = undefined;
     delete this.zoneList[id];
@@ -1328,9 +1339,9 @@ export class CssSandbox {
 
   /**
    * 创建并获取module-cube下的shadowDom,如果不需要返回module-cube
-   * @param needShadowDom 
-   * @param container 
-   * @returns 
+   * @param needShadowDom 服务配置是否需要shadowDom
+   * @param container module-cube容器
+   * @returns shadowRoot或module-cube
    */
   private getShadowDom(needShadowDom, container) {
     let subHost;
@@ -1448,10 +1459,95 @@ export class CssSandbox {
     return ret;
   }
 
-  private loadIifeInZone() {
+  /**
+   * 不是用模块联邦，立即执行函数，直接加载，为了能确定运行zone
+   * 
+   * js只需要加载一次，不需要多次加载。
+   * @param id 
+   * @param entry 
+   * @param host 
+   * @returns 
+   */
+  private async loadIifeInZone(id: string, entry: string, host = document.body) {
+    const caches = this.entryIIFEJsCache;
+    if (caches[entry]) {
+      return caches[entry].promise;
+    }
+
+    try {
+      const script = document.createElement('script');
+      script.type = 'module';
+      if (!globalThis._CSSSandbox.zoneList[id]) {
+        script.setAttribute('crossorigin', 'anonymous');
+        script.src = entry;
+        script.onload = () => {
+          globalThis._CSSSandbox.entryIIFEJsCache[entry].r(1);
+        };
+        script.onerror = () => {
+          globalThis._CSSSandbox.entryIIFEJsCache[entry].r(1);
+        };
+      } else {
+        const content = await fetch(entry).then(t => {
+          if (t.status >= 400) {
+            throw new Error('[module-cube] call iife error');
+          } else {
+            return t.text();
+          }
+        });
+
+        // module模式下必须代码内部创建zone。外部创建zone只能在非module下生效
+        script.textContent = `globalThis._CSSSandbox.zoneList['${id}].run(() => {
+  ${content};
+   lobalThis._CSSSandbox.entryIIFEJsCache['${entry}'].r(1);
+});
+//# sourceURL=${entry}
+`;
+
+      }
+
+      // iife增加执行完成的通知事件
+      caches[entry] = {};
+      caches[entry].promise = new Promise(r => {
+        caches[entry].r = r;
+      });
+
+      let myHost = host;
+      if (myHost instanceof HTMLHeadElement) {
+        myHost = document.body;
+      }
+      myHost.appendChild(script);
+
+      // 不在dom呈现script
+      if (globalThis._CSSSandbox.zoneList[id]) {
+        script.remove();
+      }
+      return caches[entry].promise;
+    } catch (e) {
+      console.error('[module-cube] load iife script error ', e.message);
+      return Promise.resolve(1);
+    }
 
   }
 
+  /**
+   * 用create的默认方式生成webcomponent组件
+   * @param zone 
+   * @param wcTagName 
+   * @returns 
+   */
+  private defaultGenWebComponent(zone, wcTagName) {
+    let wc;
+    if (zone) {
+      zone.run(() => {
+        wc = document.createElement(wcTagName);
+        wc.zone = zone;
+      });
+    } else {
+      wc = document.createElement(wcTagName);
+    }
+
+    return wc;
+  }
 
   /**
    * 在zone中执行
@@ -1485,7 +1581,7 @@ export class CssSandbox {
         }
 
         this.runLifeHooks(beforeLoadComponent!, { zone } as any);
-        this.isolateWindwoJS(jsSandboxProps!);
+        this.isolateWindowJS(jsSandboxProps!);
         if (type === ModuleType.IIFE) {
           this.loadIifeInZone(id, entryUrl, cssHost).finally(() => {
             loadCss(css, cssHost);
@@ -1510,6 +1606,12 @@ export class CssSandbox {
     }
   }
 
+  /**
+   * 清除缓存的模块host信息
+   * @param id dom的id
+   * @param shadowRoot module-cube下的shadowRoot，如果存在则校验，防止重复id替换了之前的shadowRoot 
+   * @returns 
+   */
   public clearModuleByNodeId(id: string, shadowRoot?: ShadowRoot) {
     if (!this.moduleList[id]) {
       return;
@@ -1526,7 +1628,35 @@ export class CssSandbox {
     delete this.moduleList[id];
   }
 
-  private afterRun() {
+  /**
+   * 做一些收尾处理，主要针对webcomponent组件本身的dom操作
+   * @param param0 
+   * @param options 
+   */
+  private afterRun({ module, zone, host}, options: RemoteComponentOption) {
+    const { wcTagName, wcParams, lifecycle } = options;
+    const { beforeGenWC, genWC, beforeAppendWC, afterAppendWC } = lifecycle || {};
+    let wc: any;
+
+    this.runLifeHooks(beforeGenWC!, { module, zone, host, wcTagName });
+
+    try {
+      wc = this.runLifeHooks(genWC!, { module, zone, host, wcTagName });
+      if (!wc) {
+        wc = this.defaultGenWebComponent(zone, wcTagName);
+      }
+    } catch (e) {
+      console.warn('[module-cube] genWC exception', e.message);
+      wc = this.defaultGenWebComponent(zone, wcTagName);
+    }
+
+    // 把当前的host传递给组件，方便组件查找内部的子元素
+    wc.mcHost = host;
+
+    addParams2Node(wc, wcParams);
+    this.runLifeHooks(beforeAppendWC!, { module, zone, host, wcTagName, wc });
+    host.appendChild(wc);
+    this.runLifeHooks(afterAppendWC!, { module, zone, host, wcTagName, wc });
     
   }
 
@@ -1605,7 +1735,7 @@ export class CssSandbox {
    * @param props 
    * @returns 
    */
-  private isolateWindwoJS(props: {prop: string; needClear?: boolean}[]) {
+  private isolateWindowJS(props: {prop: string; needClear?: boolean}[]) {
     if (!props?.length) {
       return;
     }

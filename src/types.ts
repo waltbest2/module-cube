@@ -1,3 +1,4 @@
+export const VERSION_POS = '@{version}';
 export interface ProviderOption {
   /**
    * 导出方法名
@@ -323,4 +324,61 @@ export enum ModuleType {
   MODULE = 'module',
 
   IIFE = 'iife',
+}
+
+/**
+ * 导出的组件通用类型
+ */
+export interface ExportComponent {
+
+  /**
+   * 装载组件，返回实例组件对象
+   * @returns 
+   */
+  mount: () => Promise<{
+
+    /**
+     * 返回的对象，进行卸载
+     * @returns 
+     */
+    unmount: () => {}
+  }>;
+}
+
+/**
+ * 加载远端组件
+ * 
+ * type=script时，remoteName必填
+ */
+export interface LoadModuleOptions {
+  /**
+   * 是否需要初始化share
+   * 
+   * 注意：本组件会缓存每个remoteEntry，以第一次使用share池为准，后续不会怎么引用，都是用公共池
+   * 
+   * 默认：true
+   */
+  needInitShare?: boolean;
+
+  /**
+   * 远端组件名，只有type=script时有效，对应type=window时的name
+   */
+  remoteName?: string;
+
+  /**
+   * remote类型
+   * 
+   * 默认：script，对应就是window
+   */
+  type: 'script' | 'module';
+
+  /**
+   * 远端入口remoteEntry的完整url
+   */
+  remoteEntry: string;
+
+  /**
+   * 对外expose的module name
+   */
+  exposedModule: string;
 }

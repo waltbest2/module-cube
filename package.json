@@ -4,8 +4,14 @@
   "description": "microfrontend sandbox base on web components",
   "main": "index.js",
   "scripts": {
+    "build": "tsc -p tsconfig.json",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "author": "wuqi",
-  "license": "MIT"
+  "license": "MIT",
+  "devDependencies": {
+    "typescript": "5.3.3",
+    "ts-loader": "^8.0.2",
+    "@types/node": "^12.11.1"
+  }
 }
