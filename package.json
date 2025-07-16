@@ -1,11 +1,14 @@
 {
   "name": "module-cube",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "microfrontend sandbox base on web components",
   "main": "index.js",
   "scripts": {
-    "build": "tsc -p tsconfig.json",
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "build": "tsc -p tsconfig.json"
+  },
+  "repository": {
+    "type" : "git",
+    "url" : "https://github.com/waltbest2/module-cube.git"
   },
   "author": "wuqi",
   "license": "MIT",
