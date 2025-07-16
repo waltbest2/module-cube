@@ -107,7 +107,7 @@ function getLinkInHost(element, host): Element | undefined {
  * @returns 
  */
 function appendPatchedStyle(host, rules, mediaConditionText?) {
-  if (rules.length) {
+  if (!rules.length) {
     return;
   }
 
@@ -1496,9 +1496,9 @@ export class CssSandbox {
         });
 
         // module模式下必须代码内部创建zone。外部创建zone只能在非module下生效
-        script.textContent = `globalThis._CSSSandbox.zoneList['${id}].run(() => {
+        script.textContent = `globalThis._CSSSandbox.zoneList['${id}'].run(() => {
   ${content};
-   lobalThis._CSSSandbox.entryIIFEJsCache['${entry}'].r(1);
+   globalThis._CSSSandbox.entryIIFEJsCache['${entry}'].r(1);
 });
 //# sourceURL=${entry}
 `;
