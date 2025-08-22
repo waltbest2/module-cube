@@ -154,7 +154,7 @@ export function patchCSS(node, sheet, mediaConditionText?) {
       patchCSS(node, rule, rule.conditionText);
     } else {
       if(rule.selectorText?.includes(':root')) {
-        rootRules.push(rule.cssText.replace(':root', ':host'));
+        rootRules.push(rule.cssText.replace(/:root(\[.*\]|\.\w+)?/g, (_match, attr) => (attr ? `:host(${attr})` : ':host')));
       } else if(rule.selectorText === 'body') {
         rootRules.push(rule.cssText.replace('body', ':host'));
       }
